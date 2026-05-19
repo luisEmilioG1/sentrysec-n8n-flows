@@ -1,0 +1,5 @@
+.DS_Store
+*.py
+/ignorar
+*.gz
+*.backup

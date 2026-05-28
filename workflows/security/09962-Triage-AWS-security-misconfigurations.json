@@ -1,0 +1,527 @@
+{
+  "name": "Security Hub Alerts Triaged by AI",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aws-misconfig",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "03317620-54c1-4688-b024-ada518a85226",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [
+        464,
+        96
+      ],
+      "webhookId": "bebea408-3564-49c8-9407-14a4102fe0cf",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Code created by ca7ai\n// n8n Code node (Run Once for Each Item)\n// Normalizes Security Hub / AWS Config events whether they arrive at root or under body\nconst evt = $json.body ?? $json;\n\n// Security Hub finding (EventBridge or raw)\nconst sh = evt?.detail?.findings?.[0] || (Array.isArray(evt.findings) ? evt.findings[0] : null);\n// AWS Config notification\nconst cfg = evt?.detail?.configRuleName ? evt.detail : null;\n// Raw Security Hub finding at root\nconst rawSh = (!sh && evt?.ProductArn) ? evt : null;\n\nconst f = sh || rawSh || {};\n\nconst sev   = f?.Severity?.Label || (cfg ? \"MEDIUM\" : \"UNKNOWN\");\nconst title = f?.Title || cfg?.configRuleName || \"Finding\";\nconst desc  = f?.Description || cfg?.newEvaluationResult?.annotation || \"—\";\nconst id    = f?.Id\n  || cfg?.newEvaluationResult?.evaluationResultIdentifier?.evaluationResultQualifier?.configRuleName\n  || String(Date.now());\nconst res   = f?.Resources?.[0]?.Id || cfg?.resourceId || \"unknown\";\nconst types = f?.Types || [];\nconst account = evt?.account || f?.AwsAccountId || \"unknown\";\nconst region  = evt?.region  || f?.Region       || \"unknown\";\n\n// Derive service + hints\nlet service = \"UNKNOWN\";\nif (/^arn:aws:s3:::/.test(res) || types.some(t => t.includes(\"S3\"))) service = \"S3\";\nelse if (types.some(t => /SecurityGroup/i.test(t)) || /sg-/.test(res)) service = \"EC2-SG\";\nelse if (types.some(t => /IAM/i.test(t))) service = \"IAM\";\nelse if (types.some(t => /RDS|SQL|DB/i.test(t))) service = \"RDS\";\nelse if (f?.ProductArn) service = (f.ProductArn.split(\":\")[5] || \"UNKNOWN\");\n\nconst misconfig_hints = [];\nif (service === \"S3\") misconfig_hints.push(\"s3\");\nif (/0\\.0\\.0\\.0\\/0|Public|Open|world/i.test(desc)) misconfig_hints.push(\"public\");\nif (service === \"EC2-SG\") misconfig_hints.push(\"sg\");\nif (service === \"IAM\")    misconfig_hints.push(\"iam\");\nif (service === \"RDS\")    misconfig_hints.push(\"db\");\n\n// IMPORTANT: return a SINGLE object (not an array) in this mode\nreturn {\n  finding_id: id,\n  title,\n  description: desc,\n  severity: sev,\n  resource_id: res,\n  service,\n  account,\n  region,\n  product_types: types,\n  misconfig_hints,\n  raw: evt,\n};"
+      },
+      "id": "f41f0ae7-902b-4155-ace6-d2ecda8c04fa",
+      "name": "Normalize Finding",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1136,
+        192
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.account }}",
+        "subject": "=={{ (() => {\n  // 1. Extraemos y limpiamos la prioridad de la IA de forma segura\n  let priority = 'UNKNOWN';\n  try {\n    const rawText = $('Message a model').item.json.content.parts[0].text.replace(/```json\\n|```/g, '');\n    priority = JSON.parse(rawText).priority || 'UNKNOWN';\n  } catch(e) {}\n\n  // 2. Apuntamos a la ubicación real del evento de AWS (dentro de .event)\n  const rawEvent = $('Normalize Finding').item.json.event || $('Normalize Finding').item.json;\n  const finding = rawEvent?.detail?.findings?.[0] || {};\n\n  // 3. Extraemos las variables individuales\n  const title = finding?.Title || 'Finding';\n  const resource = finding?.Resources?.[0]?.Id || 'No Resource';\n  const service = finding?.ProductFields?.['aws/securityhub/CompanyName'] || 'UNKNOWN';\n\n  // 4. Construimos el asunto final\n  return `[${priority}] ${title} — ${resource} (${service})`;\n})() }}",
+        "message": "=={{ (() => {\n  // 1. Obtenemos los datos limpios viajando al nodo original\n  const rawEvent = $('Normalize Finding').item.json.event || $('Normalize Finding').item.json;\n  const finding = rawEvent?.detail?.findings?.[0] || {};\n  \n  const nf = {\n    severity: finding?.Severity?.Label || 'UNKNOWN',\n    title: finding?.Title || 'Finding',\n    service: finding?.ProductFields?.['aws/securityhub/CompanyName'] || 'UNKNOWN',\n    resource_id: finding?.Resources?.[0]?.Id || '—',\n    account: rawEvent?.account || 'unknown',\n    region: rawEvent?.region || 'unknown'\n  };\n  \n  // 2. Extraemos y limpiamos el JSON de la IA forzando al nodo de la IA correcto\n  let ai = {};\n  try {\n    const aiNodeText = $('Message a model').item.json.content.parts[0].text;\n    const rawText = aiNodeText.replace(/```json\\n|```/g, '');\n    ai = JSON.parse(rawText);\n  } catch (e) {\n    ai = { priority: 'UNKNOWN', rationale: 'Error parsing AI response', remediation: [], tags: [] };\n  }\n\n  // 3. Mapeamos las listas de remediación y etiquetas\n  const steps = (ai.remediation || []).map(s => `<li>${s}</li>`).join('');\n  const tags  = (ai.tags || []).join(', ');\n  \n  // 4. Obtenemos el ID creado en Airtable de lo que entra a este nodo actual\n  const airtableId = $json.id || '';\n  const airtableLine = airtableId ? `<p><b>Airtable Record ID:</b> ${airtableId}</p>` : '';\n\n  // 5. Retornamos la plantilla HTML con los valores limpios y reales\n  return `\n    <h2>AWS Misconfig Alert</h2>\n    <p><b>Priority:</b> ${ai.priority || 'UNKNOWN'} &nbsp; <b>Severity:</b> ${nf.severity}</p>\n    <p><b>Title:</b> ${nf.title}</p>\n    <p><b>Service:</b> ${nf.service} &nbsp; <b>Resource:</b> ${nf.resource_id}</p>\n    <p><b>Account:</b> ${nf.account} &nbsp; <b>Region:</b> ${nf.region}</p>\n    <p><b>Why:</b> ${ai.rationale || '—'}</p>\n    <p><b>Remediation:</b></p>\n    <ol>${steps}</ol>\n    <p><b>Tags:</b> ${tags || '—'}</p>\n    ${airtableLine}\n    <details>\n      <summary>Raw finding</summary>\n      <pre style=\"background:#f6f8fa;padding:12px;border-radius:6px;white-space:pre-wrap\">${JSON.stringify(rawEvent, null, 2)}</pre>\n    </details>\n  `;\n})() }}",
+        "options": {}
+      },
+      "id": "4e5e5dde-4d86-469e-8f4f-b85d27c0f421",
+      "name": "Send a message",
+      "type": "n8n-nodes-base.gmail",
+      "position": [
+        1984,
+        192
+      ],
+      "webhookId": "cfac9d61-e17a-467c-a742-7cb9da960a7f",
+      "typeVersion": 2.1,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "i77XlkA2N6QHQO9G",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{\n  {\n    resp: {\n      status: \"processed\",\n      priority: $node[\"Airtable - Create Record1\"].json.fields.Priority,\n      finding_id: $node[\"Normalize Finding\"].json.finding_id\n    }\n  }\n}}\n",
+        "options": {}
+      },
+      "id": "97bccb1a-f8d7-4640-9f29-0f79ae70c671",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2208,
+        192
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $json.body ?? $json;\nconst token = $json.query?.token ?? b.token;\nif (token !== 'MY_SUPER_TOKEN') throw new Error('unauthorized');\n\nif (b.Type === 'SubscriptionConfirmation' && b.SubscribeURL) {\n  return { mode: 'confirm', subscribeUrl: b.SubscribeURL };\n}\n\nlet event = b;\nif (b.Type === 'Notification' && b.Message) {\n  try { event = JSON.parse(b.Message); } catch {}\n}\nreturn { mode: 'notify', event };\n"
+      },
+      "id": "3164c203-9296-4215-b0ff-4357df12cc4b",
+      "name": "SNS Handler",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        688,
+        96
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.subscribeUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "d5d5ab7d-758b-403f-8e5b-e71c530115fa",
+      "name": "SNS Confirm",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1136,
+        0
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "346708e7-629e-4d8a-8a98-994b9526b55d",
+              "name": "resp",
+              "type": "object",
+              "value": "={{ { status: \"subscribed\", statusCode: $json.statusCode || 200 } }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "65245843-8992-4c89-8e85-e4b40e3afd61",
+      "name": "Edit Fields1",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1456,
+        0
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "content": "## Note\n\n: You must have the AWS Side pre-configured before testing / starting this workflow\n",
+        "width": 336
+      },
+      "id": "5ffcebd9-a18e-4d0f-95f7-72b8feb7189d",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        336
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## Title: How it works (wiring)\n\n-   **Flow**: Webhook → SNS Handler → IF → (true) SNS Confirm → Done | (false) Normalize → AI → Airtable → Gmail → Respond\n    \n-   **Purpose**: triage AWS misconfigs and alert the team\n    \n-   Responds when last node finishes (returns small JSON)\n",
+        "height": 304,
+        "width": 336,
+        "color": 4
+      },
+      "id": "04f694d8-543e-4a90-8fe8-6c072afc8c39",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-3-flash-preview"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a cloud SecOps triage assistant. Given a normalized AWS finding JSON, return a STRICT JSON object:\n\n{\n  \"priority\": \"P0|P1|P2|P3\",\n  \"rationale\": \"one-paragraph reason referencing severity, resource, and exposure\",\n  \"remediation\": [\"step 1\", \"step 2\", \"...\"],\n  \"tags\": [\"s3\",\"iam\",\"public\", \"...\"]\n}\n\nMapping guidance:\n- Treat publicly accessible data (e.g., public S3 buckets, 0.0.0.0/0 on admin ports, open RDS) as P0 or P1 depending on blast radius.\n- Internal-only or low impact → P2/P3.\n- If severity label is CRITICAL/HIGH, bias to P0/P1.\n\nFinding:\n{{ JSON.stringify($json, null, 2) }}\n"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1392,
+        192
+      ],
+      "id": "6bcff175-27ee-4349-b8e9-fbdf51f12d75",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "TYfGq8tsFO8xD2dH",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "base": {
+          "__rl": true,
+          "value": "apphWmH9Xl5Z6dqdB",
+          "mode": "list",
+          "cachedResultName": "finding_table",
+          "cachedResultUrl": "https://airtable.com/apphWmH9Xl5Z6dqdB"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tbl92NgK3L9zqOuF7",
+          "mode": "list",
+          "cachedResultName": "Table 1",
+          "cachedResultUrl": "https://airtable.com/apphWmH9Xl5Z6dqdB/tbl92NgK3L9zqOuF7"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Normalize Finding').item.json.finding_id }}",
+            "Tags": "={{ JSON.parse($json.content.parts[0].text.replace(/```json\\n|```/g, '')).tags.join(', ') }}",
+            "Title": "={{ $('Normalize Finding').item.json.title }}",
+            "Region": "={{ $('Normalize Finding').item.json.region }}",
+            "Account": "={{ $('Normalize Finding').item.json.account }}",
+            "Service": "={{ $('Normalize Finding').item.json.service }}",
+            "Priority": "={{ JSON.parse($json.content.parts[0].text.replace(/```json\\n|```/g, '')).priority }}",
+            "Resource": "={{ $('Normalize Finding').item.json.raw.detail.findings[0].Resources[0].Id }}",
+            "Rationale": "={{ JSON.parse($json.content.parts[0].text.replace(/```json\\n|```/g, '')).rationale }}",
+            "Finding ID": "={{ $('Normalize Finding').item.json.finding_id }}",
+            "Remediation": "={{ JSON.parse($json.content.parts[0].text.replace(/```json\\n|```/g, '')).remediation.join(', ') }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "type": "string",
+              "display": true,
+              "removed": false,
+              "readOnly": true,
+              "required": false,
+              "displayName": "id",
+              "defaultMatch": true
+            },
+            {
+              "id": "Finding ID",
+              "type": "string",
+              "display": true,
+              "removed": false,
+              "readOnly": false,
+              "required": false,
+              "displayName": "Finding ID",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Title",
+              "type": "string",
+              "display": true,
+              "removed": false,
+              "readOnly": false,
+              "required": false,
+              "displayName": "Title",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Severity",
+              "type": "string",
+              "display": true,
+              "removed": true,
+              "readOnly": false,
+              "required": false,
+              "displayName": "Severity",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Priority",
+              "type": "string",
+              "display": true,
+              "removed": false,
+              "readOnly": false,
+              "required": false,
+              "displayName": "Priority",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Resource",
+              "type": "string",
+              "display": true,
+              "removed": false,
+              "readOnly": false,
+              "required": false,
+              "displayName": "Resource",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Service",
+              "type": "string",
+              "display": true,
+              "removed": false,
+              "readOnly": false,
+              "required": false,
+              "displayName": "Service",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Account",
+              "type": "string",
+              "display": true,
+              "removed": false,
+              "readOnly": false,
+              "required": false,
+              "displayName": "Account",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Region",
+              "type": "string",
+              "display": true,
+              "removed": false,
+              "readOnly": false,
+              "required": false,
+              "displayName": "Region",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Tags",
+              "type": "string",
+              "display": true,
+              "removed": false,
+              "readOnly": false,
+              "required": false,
+              "displayName": "Tags",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Rationale",
+              "type": "string",
+              "display": true,
+              "removed": false,
+              "readOnly": false,
+              "required": false,
+              "displayName": "Rationale",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Remediation",
+              "type": "string",
+              "display": true,
+              "removed": false,
+              "readOnly": false,
+              "required": false,
+              "displayName": "Remediation",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a34e8503-e8d9-40d0-9c5b-025855ef9b1e",
+      "name": "Airtable - Create Record1",
+      "type": "n8n-nodes-base.airtable",
+      "position": [
+        1760,
+        192
+      ],
+      "typeVersion": 2.1,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "d84XjqUI6bMRaf4L",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cac7c3ee-c76f-4ffe-87c1-262abe7a9220",
+              "leftValue": "={{ $json.mode }}",
+              "rightValue": "confirm",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        912,
+        96
+      ],
+      "id": "f12ecea1-ee2f-4e25-9a2f-d04d358afce6",
+      "name": "If"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "SNS Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SNS Confirm": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SNS Handler": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Finding": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Create Record1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Create Record1": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "SNS Confirm",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normalize Finding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "258f909b-66a4-4d47-aff5-74e57d4f6a23",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a4ce0f198c47bb3de36ae1dd4e71a9c887e93448737eecf3b54f2a322e10a6d5"
+  },
+  "id": "TU6gFLT9nzDlrFnJ",
+  "tags": []
+}

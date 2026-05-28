@@ -1,0 +1,165 @@
+{
+  "name": "openai-tweet-generator",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "On clicking 'execute'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "334d5497-8443-4749-9a52-77a776c197c6"
+    },
+    {
+      "parameters": {
+        "functionCode": "// hashtag list\nconst Hashtags = [\n \"#techtwitter\",\n \"#n8n\"\n];\n\n// random output function\nconst randomHashtag = Hashtags[Math.floor(Math.random() * Hashtags.length)];\nitem.hashtag = randomHashtag;\nreturn item;"
+      },
+      "name": "FunctionItem",
+      "type": "n8n-nodes-base.functionItem",
+      "position": [
+        208,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "0e578f4b-b58e-44ce-9ad0-d9b81fc3c8d2"
+    },
+    {
+      "parameters": {
+        "authentication": "queryAuth",
+        "requestMethod": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={\n  \"contents\": [\n    {\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"text\": \"Escribe un tweet completo y emocionante. \\n\\nInstrucción: Habla sobre por qué {{ $json.hashtag }} es tendencia hoy. \\n\\nReglas de oro:\\n1. No empieces la frase con el hashtag.\\n2. Escribe al menos dos oraciones completas.\\n3. Usa un emoji.\\n4. Incluye el hashtag al final del texto.\\n5. El texto debe tener entre 80 y 120 caracteres.\\n\\nEjemplo: ¡La automatización con n8n me ha salvado la vida esta semana! Es increíble lo que puedes lograr sin saber programar. 🚀 #n8n\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 1,\n    \"topP\": 0.95\n  }\n}"
+      },
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        400,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "29a510ae-b3da-4b1e-871e-7e06baa392ba",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "SOgNJAaTil6ZzMpW",
+          "name": "Query Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "airtableTokenApi",
+        "operation": "append",
+        "application": {
+          "__rl": true,
+          "value": "app3TBWMJNR4meTJV",
+          "mode": "id"
+        },
+        "table": "main",
+        "options": {}
+      },
+      "name": "Airtable",
+      "type": "n8n-nodes-base.airtable",
+      "position": [
+        800,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "ac52847d-a39b-48f6-bc3e-a3bfa349bfd5",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "GrxMmUimUlCbAQPJ",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "Hashtag",
+              "value": "={{$node[\"FunctionItem\"].json[\"hashtag\"]}}"
+            },
+            {
+              "name": "Content",
+              "value": "={{ $node[\"HTTP Request\"].json[\"candidates\"][0][\"content\"][\"parts\"][0][\"text\"] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        608,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "0ef942d7-3c7b-4d33-8e1b-71467e664c69"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Set": {
+      "main": [
+        [
+          {
+            "node": "Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FunctionItem": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Set",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On clicking 'execute'": {
+      "main": [
+        [
+          {
+            "node": "FunctionItem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "8e5b5a4b-745d-404b-b85a-46df57e79f45",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b1a7ff0aebfe7be88aee8377ae86bd780af56bc2016aa5d6396954af499c2e49"
+  },
+  "id": "LliwkLZ2C6Wprk4D",
+  "tags": []
+}

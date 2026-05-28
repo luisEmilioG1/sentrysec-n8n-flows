@@ -1,0 +1,230 @@
+{
+  "name": "M4 - Incident Classifier",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "0dc8eda9-14ce-48be-956e-c2700a5fa5fa",
+      "name": "✏️ Format Tags",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        560,
+        224
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "sheetId": "1zqg0PcqFNb8HL1uFVpiL0b2HmYMDjanL_yYV_yLzkJc",
+        "range": "A1:K10",
+        "options": {}
+      },
+      "id": "642c1a39-8d74-402a-8cec-5f31faf236d4",
+      "name": "📄 Google Sheets - Read Alerts",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        144,
+        224
+      ],
+      "typeVersion": 1,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iDV64b05v8ihAeFB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"text\": \"You are a security analyst. Classify the following incident and provide a severity and recommended action in JSON format. Example: { \\\"severity\\\": \\\"High\\\", \\\"action\\\": \\\"Isolate\\\" }. New incident on host: {{ $json.hostname }}. IP: {{ $json.ip }}. Risk score: {{ $json.risk_score }}\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"responseMimeType\": \"application/json\"\n  }\n}",
+        "options": {}
+      },
+      "id": "400ea9a0-f57d-476c-b17a-0aae0a4862ec",
+      "name": "🧠 Classify Incident (GPT)",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        368,
+        224
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "SOgNJAaTil6ZzMpW",
+          "name": "Query Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "id": "db9a3797-0f1b-4883-8d85-06ff575e9c96",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [
+        -80,
+        224
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1zqg0PcqFNb8HL1uFVpiL0b2HmYMDjanL_yYV_yLzkJc",
+          "mode": "list",
+          "cachedResultName": "Hoja n8n",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zqg0PcqFNb8HL1uFVpiL0b2HmYMDjanL_yYV_yLzkJc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 710408423,
+          "mode": "list",
+          "cachedResultName": "TU_HOJA_DE_RESULTADOS",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1zqg0PcqFNb8HL1uFVpiL0b2HmYMDjanL_yYV_yLzkJc/edit#gid=710408423"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $now.toFormat('yyyy-MM-dd HH:mm:ss') }}",
+            "Hostname": "={{ $node[\"📄 Google Sheets - Read Alerts\"].json[\"hostname\"] }}",
+            "Severity": "={{ JSON.parse($json.candidates[0].content.parts[0].text).severity }}",
+            "Action": "={{ JSON.parse($json.candidates[0].content.parts[0].text).action }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Hostname",
+              "displayName": "Hostname",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Severity",
+              "displayName": "Severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Action",
+              "displayName": "Action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "9b6a9370-e065-4a5f-bb4b-c304a60aa633",
+      "name": "Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        752,
+        224
+      ],
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iDV64b05v8ihAeFB",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "📄 Google Sheets - Read Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✏️ Format Tags": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧠 Classify Incident (GPT)": {
+      "main": [
+        [
+          {
+            "node": "✏️ Format Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📄 Google Sheets - Read Alerts": {
+      "main": [
+        [
+          {
+            "node": "🧠 Classify Incident (GPT)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "06a477f7-3bc8-4144-955a-91129613f93a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b1a7ff0aebfe7be88aee8377ae86bd780af56bc2016aa5d6396954af499c2e49"
+  },
+  "id": "bXSX3QIykw0MJXei",
+  "tags": []
+}

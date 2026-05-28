@@ -1,0 +1,465 @@
+{
+  "name": "M2 - Asset Enrichment Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "IP_Address",
+        "joinMode": "enrichInput1",
+        "options": {}
+      },
+      "id": "1ba2b149-edd1-4b9b-bfec-94946db66c20",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        112,
+        240
+      ],
+      "typeVersion": 3.1
+    },
+    {
+      "parameters": {},
+      "id": "0ecb19c5-bdc7-4356-bd06-13cd90d46b74",
+      "name": "🔁 Daily Trigger",
+      "type": "n8n-nodes-base.cron",
+      "position": [
+        -416,
+        240
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "functionCode": "// Este script procesa los datos combinados del Merge\n// y calcula el nivel de impacto real cruzando la amenaza con el activo.\n\nfor (let item of items) {\n  // 1. Extraemos los valores de peligro y criticidad (si no existen, ponemos por defecto 1)\n  const threatScore = parseFloat(item.json.Threat_Score) || 1.0;\n  const criticalityValue = parseInt(item.json.Criticality_Value) || 1;\n\n  // 2. Aplicamos la fórmula BlueOps: Impacto = Peligro x Valor del Activo\n  const impactScore = (threatScore * criticalityValue).toFixed(1);\n  item.json.impact_score = parseFloat(impactScore);\n\n  // 3. Lógica de Playbook automático según el Impact Score resultante\n  let playbook = \"\";\n  let severityLabel = \"\";\n\n  if (item.json.impact_score >= 20.0) {\n    severityLabel = \"CRÍTICO 🚨\";\n    playbook = \"ACCION INMEDIATA: Aislar el activo de la red (Containment Playbook). Notificar al equipo de guardia y aplicar parche de emergencia.\";\n  } else if (item.json.impact_score >= 10.0) {\n    severityLabel = \"ALTO ⚠️\";\n    playbook = \"ACCION PRIORITARIA: Mitigar vulnerabilidad en las próximas 24 horas. Reforzar reglas de Firewall temporales.\";\n  } else {\n    severityLabel = \"BAJO 🟢\";\n    playbook = \"MONITOREO: Registrar en bitácora. Programar parche en la ventana de mantenimiento mensual ordinaria.\";\n  }\n\n  // 4. Inyectamos los nuevos campos enriquecidos al JSON para que los usen los nodos siguientes\n  item.json.severity_label = severityLabel;\n  item.json.action_playbook = playbook;\n}\n\nconsole.log('Enriquecimiento BlueOps Completado con Éxito.');\nreturn items;"
+      },
+      "id": "2b17164c-5d55-45a4-8518-d0e3b5250217",
+      "name": "🧠Match Threats to Assets",
+      "type": "n8n-nodes-base.function",
+      "position": [
+        320,
+        240
+      ],
+      "executeOnce": true,
+      "typeVersion": 1,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1gvAO9iS7jhbwFs_wNYwGiqbOoMc3tNU5CCd_EVKw3-E",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1247852314,
+          "mode": "list",
+          "cachedResultName": "Live_Threats",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1gvAO9iS7jhbwFs_wNYwGiqbOoMc3tNU5CCd_EVKw3-E/edit#gid=1247852314"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Fila Origen": "={{ $json.row_number }}",
+            "IP Activo": "={{ $json.IP_Address }}",
+            "CVE Detectado": "={{ $json.CVE }}",
+            "Impact Score": "={{ $json.impact_score }}",
+            "Criticidad": "={{ $json.severity_label }}",
+            "Playbook / Acción": "={{ $json.action_playbook }}"
+          },
+          "matchingColumns": [
+            "IP Activo"
+          ],
+          "schema": [
+            {
+              "id": "Fila Origen",
+              "displayName": "Fila Origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "IP Activo",
+              "displayName": "IP Activo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "CVE Detectado",
+              "displayName": "CVE Detectado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Impact Score",
+              "displayName": "Impact Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Criticidad",
+              "displayName": "Criticidad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Playbook / Acción",
+              "displayName": "Playbook / Acción",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "fbf05db7-2dd7-4168-a668-b0b26090f617",
+      "name": "📊 Apend New Threat",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        560,
+        240
+      ],
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iDV64b05v8ihAeFB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "documentId": {
+          "__rl": true,
+          "value": "1gvAO9iS7jhbwFs_wNYwGiqbOoMc3tNU5CCd_EVKw3-E",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "CyberPulse_Threats_DB",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1gvAO9iS7jhbwFs_wNYwGiqbOoMc3tNU5CCd_EVKw3-E/edit#gid=0"
+        },
+        "startIndex": "={{ $json.row_number }}"
+      },
+      "id": "2cd516ac-b411-456a-8bd1-2f110a4a1b0b",
+      "name": "📊 Delete Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        560,
+        432
+      ],
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iDV64b05v8ihAeFB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "",
+        "toEmail": "",
+        "subject": "=🚨 ALERTA BLUEOPS: Incidente {{ $json.severity_label }} detectado en {{ $json.Hostname }}",
+        "html": "=<h2>🚨 Reporte de Enriquecimiento de Activos - CyberPulse BlueOps</h2>\n<p>Se ha detectado y analizado una amenaza activa que compromete la infraestructura de la empresa.</p>\n\n<table border=\"1\" cellpadding=\"8\" style=\"border-collapse: collapse; width: 100%; font-family: Arial, sans-serif;\">\n  <tr style=\"background-color: #f2f2f2;\">\n    <th colspan=\"2\" style=\"text-align: left; color: #d9534f;\">📋 DETALLES DEL INCIDENTE</th>\n  </tr>\n  <tr>\n    <td><strong>Nivel de Criticidad:</strong></td>\n    <td><span style=\"font-weight: bold; color: #d9534f;\">{{ $json.severity_label }}</span></td>\n  </tr>\n  <tr>\n    <td><strong>Impact Score Calculado:</strong></td>\n    <td><strong>{{ $json.impact_score }}</strong> (Threat: {{ $json.Threat_Score }} × Asset Value: {{ $json.Criticality_Value }})</td>\n  </tr>\n  <tr>\n    <td><strong>Código de Amenaza (CVE):</strong></td>\n    <td><code>{{ $json.CVE }}</code></td>\n  </tr>\n  \n  <tr style=\"background-color: #f2f2f2;\">\n    <th colspan=\"2\" style=\"text-align: left; color: #0275d8;\">🖥️ ACTIVO AFECTADO</th>\n  </tr>\n  <tr>\n    <td><strong>Nombre del Servidor (Hostname):</strong></td>\n    <td><code>{{ $json.Hostname }}</code></td>\n  </tr>\n  <tr>\n    <td><strong>Dirección IP:</strong></td>\n    <td><code>{{ $json.IP_Address }}</code></td>\n  </tr>\n  <tr>\n    <td><strong>Sistema Operativo:</strong></td>\n    <td>{{ $json.Operating_System }}</td>\n  </tr>\n  <tr>\n    <td><strong>Tipo de Activo:</strong></td>\n    <td>{{ $json.Asset_Type }}</td>\n  </tr>\n  \n  <tr style=\"background-color: #f2f2f2;\">\n    <th colspan=\"2\" style=\"text-align: left; color: #f0ad4e;\">🛡️ PLAYBOOK DE DEFENSA RECOMENDADO</th>\n  </tr>\n  <tr>\n    <td colspan=\"2\" style=\"background-color: #fefbed; font-style: italic;\">\n      {{ $json.action_playbook }}\n    </td>\n  </tr>\n</table>\n\n<p style=\"font-size: 11px; color: #777; margin-top: 20px;\">\n  Este correo fue generado automáticamente por el motor M2 - Asset Enrichment Engine. Fila de origen procesada: #{{ $json.row_number }}.\n</p>",
+        "options": {}
+      },
+      "id": "e73d219a-cdff-43b3-b8da-4089fae14148",
+      "name": "📬Send Summary Email",
+      "type": "n8n-nodes-base.emailSend",
+      "position": [
+        560,
+        80
+      ],
+      "typeVersion": 1,
+      "credentials": {
+        "smtp": {
+          "id": "Qqs7G12PTcyfnbEE",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1gvAO9iS7jhbwFs_wNYwGiqbOoMc3tNU5CCd_EVKw3-E",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 5271894,
+          "mode": "list",
+          "cachedResultName": "Archived_Threats",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1gvAO9iS7jhbwFs_wNYwGiqbOoMc3tNU5CCd_EVKw3-E/edit#gid=5271894"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Fila Origen",
+              "displayName": "Fila Origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "IP Activo",
+              "displayName": "IP Activo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "CVE Detectado",
+              "displayName": "CVE Detectado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Impact Score",
+              "displayName": "Impact Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Criticidad",
+              "displayName": "Criticidad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Playbook / Acción",
+              "displayName": "Playbook / Acción",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "3ef59aa9-1ddb-4a2e-ad60-277b8ab64e15",
+      "name": "🗃️  Archived_Threats",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        752,
+        240
+      ],
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iDV64b05v8ihAeFB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1gvAO9iS7jhbwFs_wNYwGiqbOoMc3tNU5CCd_EVKw3-E",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "CyberPulse_Threats_DB",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1gvAO9iS7jhbwFs_wNYwGiqbOoMc3tNU5CCd_EVKw3-E/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "0f26df50-c350-4f19-b3b6-bd5245e3b985",
+      "name": "📊Threats Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        -208,
+        160
+      ],
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iDV64b05v8ihAeFB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1gvAO9iS7jhbwFs_wNYwGiqbOoMc3tNU5CCd_EVKw3-E",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 403389138,
+          "mode": "list",
+          "cachedResultName": "CyberPulse_Asset_Inventory",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1gvAO9iS7jhbwFs_wNYwGiqbOoMc3tNU5CCd_EVKw3-E/edit#gid=403389138"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -192,
+        304
+      ],
+      "id": "3636c9a8-2b0f-497b-a839-c79a948673f9",
+      "name": "📊Load Asset DB",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iDV64b05v8ihAeFB",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "🧠Match Threats to Assets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊Threats Sheets": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔁 Daily Trigger": {
+      "main": [
+        [
+          {
+            "node": "📊Threats Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📊Load Asset DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Apend New Threat": {
+      "main": [
+        [
+          {
+            "node": "🗃️  Archived_Threats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧠Match Threats to Assets": {
+      "main": [
+        [
+          {
+            "node": "📬Send Summary Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📊 Apend New Threat",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📊 Delete Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊Load Asset DB": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f500ac48-1b35-472c-8d81-b6dd0616b748",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b1a7ff0aebfe7be88aee8377ae86bd780af56bc2016aa5d6396954af499c2e49"
+  },
+  "id": "XNGKpc0sGUq6ZGFV",
+  "tags": []
+}
